@@ -1,0 +1,481 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>HuggingFace Dataset Visualizer</title>
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0-alpha1/dist/css/bootstrap.min.css" rel="stylesheet">
+    <style>
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            padding: 20px;
+            background-color: #f8f9fa;
+        }
+        .container {
+            max-width: 1200px;
+            margin: 0 auto;
+        }
+        .card {
+            border-radius: 8px;
+            box-shadow: 0 4px 8px rgba(0, 0, 0, 0.1);
+            margin-bottom: 20px;
+            background-color: white;
+        }
+        .card-header {
+            background-color: #f1f8ff;
+            font-weight: 600;
+            border-bottom: 1px solid #e3e8f0;
+        }
+        pre {
+            background-color: #f6f8fa;
+            border-radius: 6px;
+            padding: 15px;
+            white-space: pre-wrap;
+            overflow-x: auto;
+        }
+        .json-key {
+            color: #0366d6;
+        }
+        .json-string {
+            color: #24292e;
+        }
+        .json-number {
+            color: #005cc5;
+        }
+        .json-boolean {
+            color: #d73a49;
+        }
+        .nav-buttons {
+            display: flex;
+            justify-content: space-between;
+            margin: 20px 0;
+        }
+        .button-group {
+            display: flex;
+            gap: 10px;
+        }
+        .feature-list {
+            max-height: 200px;
+            overflow-y: auto;
+        }
+        #loading {
+            display: none;
+            text-align: center;
+            padding: 20px;
+        }
+        .spinner-border {
+            width: 3rem;
+            height: 3rem;
+        }
+        .example-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+        .example-index {
+            font-size: 0.9rem;
+            color: #666;
+        }
+        #config-selector {
+            display: none;
+            margin-top: 15px;
+        }
+        /* Message content styling */
+        .message-content {
+            background-color: #f0f7ff;
+            border-left: 4px solid #0366d6;
+            padding: 15px 20px;
+            border-radius: 0 6px 6px 0;
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            white-space: pre-wrap;
+            overflow-x: auto;
+            margin: 10px 0;
+            line-height: 1.6;
+            max-height: 400px;
+            overflow-y: auto;
+        }
+        .card-body.message {
+            padding: 0;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1 class="mb-4 mt-3">🤗 HuggingFace Dataset Visualizer </h1>
+        
+        <div class="card mb-4">
+            <div class="card-header">📋 Load Dataset</div>
+            <div class="card-body">
+                <div class="input-group mb-3">
+                    <input type="text" id="dataset-input" class="form-control" 
+                           placeholder="Enter dataset name (e.g., HuggingFaceTB/smoltalk, tatsu-lab/alpaca)" 
+                           aria-label="Dataset Name">
+                    <button class="btn btn-primary" id="load-btn">Load Dataset</button>
+                </div>
+                <div class="form-text">Examples: HuggingFaceTB/smoltalk, tatsu-lab/alpaca</div>
+                
+                <div id="config-selector" class="mt-3">
+                    <div class="alert alert-info mb-2">
+                        <i>🔍 This dataset requires a configuration. Please select one:</i>
+                    </div>
+                    <select class="form-select mb-2" id="config-select"></select>
+                    <button class="btn btn-primary" id="load-with-config-btn">Load With Selected Config</button>
+                </div>
+            </div>
+        </div>
+
+        <div id="loading">
+            <div class="spinner-border text-primary" role="status">
+                <span class="visually-hidden">Loading...</span>
+            </div>
+            <p>🔄 Loading dataset... This may take a while for large datasets.</p>
+        </div>
+
+        <div id="dataset-info" class="card mb-4" style="display: none;">
+            <div class="card-header">📊 Dataset Information</div>
+            <div class="card-body">
+                <div class="row">
+                    <div class="col-md-6">
+                        <p><strong>Dataset:</strong> <span id="dataset-name"></span></p>
+                        <p><strong>Config:</strong> <span id="config-name">default</span></p>
+                        <p><strong>Number of examples:</strong> <span id="num-examples"></span></p>
+                    </div>
+                    <div class="col-md-6">
+                        <p><strong>Features:</strong></p>
+                        <ul id="features-list" class="feature-list"></ul>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <div id="example-viewer" style="display: none;">
+            <div class="nav-buttons">
+                <div class="button-group">
+                    <button id="prev-btn" class="btn btn-secondary">⬅️ Previous</button>
+                    <button id="next-btn" class="btn btn-secondary">Next ➡️</button>
+                </div>
+                <div class="input-group" style="width: 300px;">
+                    <span class="input-group-text">🔢 Jump to</span>
+                    <input type="number" id="jump-input" class="form-control" min="0">
+                    <button class="btn btn-outline-secondary" id="jump-btn">Go</button>
+                </div>
+            </div>
+
+            <div id="example-container"></div>
+        </div>
+
+        <div id="error-container" class="alert alert-danger mt-3" style="display: none;"></div>
+    </div>
+
+    <script>
+        let currentDataset = '';
+        let currentConfig = null;
+        let currentIndex = 0;
+        let totalExamples = 0;
+        let cachedExamples = {};
+
+        document.getElementById('load-btn').addEventListener('click', loadDatasetOrGetConfigs);
+        document.getElementById('load-with-config-btn').addEventListener('click', loadDatasetWithConfig);
+        document.getElementById('prev-btn').addEventListener('click', () => navigateExample(-1));
+        document.getElementById('next-btn').addEventListener('click', () => navigateExample(1));
+        document.getElementById('jump-btn').addEventListener('click', jumpToExample);
+        document.getElementById('dataset-input').addEventListener('keypress', function(e) {
+            if (e.key === 'Enter') {
+                loadDatasetOrGetConfigs();
+            }
+        });
+
+        function showLoading(show) {
+            document.getElementById('loading').style.display = show ? 'block' : 'none';
+        }
+
+        function showError(message) {
+            const errorContainer = document.getElementById('error-container');
+            errorContainer.innerHTML = `❌ ${message}`;
+            errorContainer.style.display = 'block';
+        }
+
+        function hideError() {
+            document.getElementById('error-container').style.display = 'none';
+        }
+
+        function showConfigSelector(show, configs = []) {
+            const selector = document.getElementById('config-selector');
+            selector.style.display = show ? 'block' : 'none';
+            
+            if (show && configs.length > 0) {
+                const select = document.getElementById('config-select');
+                select.innerHTML = '';
+                configs.forEach(config => {
+                    const option = document.createElement('option');
+                    option.value = config;
+                    option.textContent = config;
+                    select.appendChild(option);
+                });
+            }
+        }
+
+        function formatJSON(obj) {
+            const json = JSON.stringify(obj, null, 2);
+            return json.replace(/("(\\u[a-zA-Z0-9]{4}|\\[^u]|[^\\"])*"(\s*:)?|\b(true|false|null)\b|-?\d+(?:\.\d*)?(?:[eE][+\-]?\d+)?)/g, function(match) {
+                let cls = 'json-number';
+                if (/^"/.test(match)) {
+                    if (/:$/.test(match)) {
+                        cls = 'json-key';
+                    } else {
+                        cls = 'json-string';
+                    }
+                } else if (/true|false/.test(match)) {
+                    cls = 'json-boolean';
+                }
+                return '<span class="' + cls + '">' + match + '</span>';
+            });
+        }
+
+        function loadDatasetOrGetConfigs() {
+            const datasetName = document.getElementById('dataset-input').value.trim();
+            if (!datasetName) {
+                showError('Please enter a dataset name');
+                return;
+            }
+
+            hideError();
+            showLoading(true);
+            document.getElementById('dataset-info').style.display = 'none';
+            document.getElementById('example-viewer').style.display = 'none';
+            showConfigSelector(false);
+
+            try {
+                fetch('/api/load_dataset', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                    },
+                    body: JSON.stringify({ dataset_name: datasetName }),
+                })
+                .then(response => response.json())
+                .then(data => {
+                    if (data.success) {
+                        // Dataset loaded successfully
+                        processLoadedDataset(data, datasetName);
+                    } else if (data.need_config) {
+                        // Dataset needs a config
+                        showConfigSelector(true, data.configs);
+                        showLoading(false);
+                    } else {
+                        showError(`Error loading dataset: ${data.error}`);
+                        showLoading(false);
+                    }
+                })
+                .catch(error => {
+                    showError(`Network error: ${error.message}`);
+                    showLoading(false);
+                });
+            } catch (error) {
+                showError(`Error: ${error.message}`);
+                showLoading(false);
+            }
+        }
+        
+        function loadDatasetWithConfig() {
+            const datasetName = document.getElementById('dataset-input').value.trim();
+            const configName = document.getElementById('config-select').value;
+            
+            if (!datasetName || !configName) {
+                showError('Please select a valid dataset and configuration');
+                return;
+            }
+            
+            hideError();
+            showLoading(true);
+            document.getElementById('dataset-info').style.display = 'none';
+            document.getElementById('example-viewer').style.display = 'none';
+            showConfigSelector(false);
+            
+            fetch('/api/load_dataset', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                },
+                body: JSON.stringify({ 
+                    dataset_name: datasetName,
+                    config_name: configName 
+                }),
+            })
+            .then(response => response.json())
+            .then(data => {
+                if (data.success) {
+                    // Process the loaded dataset
+                    processLoadedDataset(data, datasetName, configName);
+                } else {
+                    showError(`Error loading dataset: ${data.error}`);
+                }
+            })
+            .catch(error => {
+                showError(`Network error: ${error.message}`);
+            })
+            .finally(() => {
+                showLoading(false);
+            });
+        }
+        
+        function processLoadedDataset(data, datasetName, configName = null) {
+            currentDataset = datasetName;
+            currentConfig = configName || data.info.config_name;
+            totalExamples = data.info.num_examples;
+            currentIndex = 0;
+            cachedExamples = {};
+            
+            // Cache the first examples
+            data.examples.forEach((example, index) => {
+                cachedExamples[index] = example;
+            });
+            
+            // Display dataset info
+            document.getElementById('dataset-name').textContent = data.info.dataset_name;
+            document.getElementById('config-name').textContent = currentConfig || "default";
+            document.getElementById('num-examples').textContent = totalExamples;
+            
+            const featuresList = document.getElementById('features-list');
+            featuresList.innerHTML = '';
+            data.info.features.forEach(feature => {
+                const li = document.createElement('li');
+                li.textContent = feature;
+                featuresList.appendChild(li);
+            });
+            
+            document.getElementById('dataset-info').style.display = 'block';
+            document.getElementById('example-viewer').style.display = 'block';
+            
+            // Display the first example
+            displayExample(0);
+            
+            // Update jump input max value
+            document.getElementById('jump-input').max = totalExamples - 1;
+            
+            showLoading(false);
+        }
+
+        async function getExample(index) {
+            if (cachedExamples[index]) {
+                return {
+                    success: true,
+                    example: cachedExamples[index],
+                    index: index,
+                    total: totalExamples
+                };
+            }
+            
+            const response = await fetch('/api/get_example', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                },
+                body: JSON.stringify({ 
+                    dataset_name: currentDataset,
+                    config_name: currentConfig,
+                    index: index
+                }),
+            });
+            
+            const data = await response.json();
+            
+            if (data.success) {
+                cachedExamples[index] = data.example;
+            }
+            
+            return data;
+        }
+
+        async function displayExample(index) {
+            hideError();
+            showLoading(true);
+            
+            try {
+                const data = await getExample(index);
+                
+                if (data.success) {
+                    const container = document.getElementById('example-container');
+                    container.innerHTML = '';
+                    
+                    for (const [key, value] of Object.entries(data.example)) {
+                        const card = document.createElement('div');
+                        card.className = 'card mb-3';
+                        
+                        const cardHeader = document.createElement('div');
+                        cardHeader.className = 'card-header example-header';
+                        
+                        const keyTitle = document.createElement('span');
+                        keyTitle.textContent = key;
+                        cardHeader.appendChild(keyTitle);
+                        
+                        const indexSpan = document.createElement('span');
+                        indexSpan.className = 'example-index';
+                        indexSpan.textContent = `🤗 Example ${index + 1} of ${totalExamples} `;
+                        cardHeader.appendChild(indexSpan);
+                        
+                        card.appendChild(cardHeader);
+                        
+                        const cardBody = document.createElement('div');
+                        
+                        // Check if this is a message content field
+                        const isMessageField = ['content', 'message', 'text', 'prompt', 'completion'].includes(key) && 
+                                              typeof value === 'string';
+                        
+                        if (isMessageField) {
+                            // Special handling for message content
+                            cardBody.className = 'card-body message';
+                            const contentDiv = document.createElement('div');
+                            contentDiv.className = 'message-content';
+                            contentDiv.textContent = value;
+                            cardBody.appendChild(contentDiv);
+                        } else if (typeof value === 'object') {
+                            cardBody.className = 'card-body';
+                            const pre = document.createElement('pre');
+                            pre.innerHTML = formatJSON(value);
+                            cardBody.appendChild(pre);
+                        } else {
+                            cardBody.className = 'card-body';
+                            const p = document.createElement('p');
+                            p.textContent = value;
+                            cardBody.appendChild(p);
+                        }
+                        
+                        card.appendChild(cardBody);
+                        container.appendChild(card);
+                    }
+                    
+                    currentIndex = index;
+                    document.getElementById('jump-input').value = index;
+                    
+                    // Update button states
+                    document.getElementById('prev-btn').disabled = index === 0;
+                    document.getElementById('next-btn').disabled = index === totalExamples - 1;
+                } else {
+                    showError(`Error loading example: ${data.error}`);
+                }
+            } catch (error) {
+                showError(`Network error: ${error.message}`);
+            } finally {
+                showLoading(false);
+            }
+        }
+
+        function navigateExample(direction) {
+            const newIndex = currentIndex + direction;
+            if (newIndex >= 0 && newIndex < totalExamples) {
+                displayExample(newIndex);
+            }
+        }
+
+        function jumpToExample() {
+            const index = parseInt(document.getElementById('jump-input').value);
+            if (!isNaN(index) && index >= 0 && index < totalExamples) {
+                displayExample(index);
+            } else {
+                showError(`Invalid index. Please enter a number between 0 and ${totalExamples - 1}`);
+            }
+        }
+    </script>
+</body>
+</html>
